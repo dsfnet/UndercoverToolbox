@@ -85,6 +85,9 @@ Fixed @Credential update applying only to the last database in a multi-database 
 Fixed wildcard DELETE running outside the loop — multiple wildcard patterns now all cleaned up correctly
 Fixed point-in-time block generating RESTORE DATABASE instead of RESTORE LOG with STOPAT
 
+19 October 2026
+@BufferCount parameter added — sets the number of I/O buffers for RESTORE commands (positive integer, default NULL, option not added)
+
 MIT License
 ------------
 
@@ -154,6 +157,9 @@ Parameters
 @MaxTransferSize -	Largest unit of transfer in bytes between backup media and SQL Server.
 					Must be a multiple of 65536, max 4194304 (4MB) - DEFAULT: 1048576 (1MB)
 
+@BufferCount -		Number of I/O buffers for RESTORE commands. Adds BufferCount = <value> to each RESTORE command.
+					Must be a positive number - DEFAULT: NULL (option not added)
+
 Full documentation and examples can be found at www.sqlundercover.com
 
 */
@@ -178,15 +184,15 @@ CREATE PROC sp_RestoreScript
 	@NoRecovery BIT = 0,
 	@BrokerOptions VARCHAR(30) = '',
 	@StandBy VARCHAR(260) = NULL,
-	@RestoreTimeEstimate BIT = 0,
-	-- appears to be dead code; never referenced in the proc body
+	@RestoreTimeEstimate BIT = 0,		-- appears to be dead code; never referenced in the proc body
 	@Credential VARCHAR(128) = NULL,
 	@IncludeCopyOnly BIT = 1,
 	@SingleUser BIT = 0,
 	@StopAtMark VARCHAR(128) = NULL,
 	@StopBeforeMark VARCHAR(128) = NULL,
 	@Stats INT = 5,
-	@MaxTransferSize INT = 1048576
+	@MaxTransferSize INT = 1048576,
+	@BufferCount INT = NULL
 )
 
 AS
@@ -232,6 +238,13 @@ BEGIN
 	IF @MaxTransferSize > 4194304 OR @MaxTransferSize % 65536 != 0
 BEGIN
 		RAISERROR (N'@MaxTransferSize must be a multiple of 65536 and cannot exceed 4194304 (4MB)', 15, 1)
+		RETURN 1
+	END
+
+	--Check that @BufferCount is a positive number when it is set
+	IF @BufferCount IS NOT NULL AND @BufferCount < 1
+BEGIN
+		RAISERROR (N'@BufferCount must be a positive number', 15, 1)
 		RETURN 1
 	END
 
@@ -733,6 +746,14 @@ BEGIN
     WHERE AlterCommand = 0;
 	END
 
+	--if BufferCount is set, add to statement
+	IF @BufferCount IS NOT NULL
+BEGIN
+		UPDATE #BackupCommandsFinal
+	SET command = command + ', BufferCount = ' + CAST(@BufferCount AS VARCHAR)
+	WHERE AlterCommand = 0;
+	END
+
 	--if DiffOnly, delete full backup file from #BackupCommandsFinal
 	IF (@RestoreOptions = 'DiffOnly')
 BEGIN
@@ -756,3 +777,4 @@ BEGIN
 	END
 
 END
+GO
